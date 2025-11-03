@@ -1,0 +1,86 @@
+# .github/workflows/docker-build-push.yml
+#
+# 这个 GitHub Action Workflow 用于自动构建 Docker 镜像并将其推送到私有仓库或 Docker Hub。
+#
+# 触发条件:
+# 1. schedule: 定时触发，默认为每天 UTC 时间 00:00 (北京时间 08:00)。
+# 2. workflow_dispatch: 允许您在 GitHub 仓库的 "Actions" 标签页中手动触发此流程。
+#
+# 所需的 GitHub Secrets:
+# - REGISTRY_URL: 您的私有仓库 URL (例如: 'ghcr.io' 或 'your-registry.example.com')。如果使用 Docker Hub, 请留空或不设置。
+# - REGISTRY_USERNAME: 登录仓库的用户名。
+# - REGISTRY_TOKEN: 登录仓库的访问令牌或密码。
+# - REGISTRY_IMAGE_NAME: 您希望推送的镜像名称 (例如: 'your-username/your-repo-name')。
+
+name: Build and Push Docker Image
+
+on:
+  workflow_dispatch: # 允许手动触发
+  schedule:
+    - cron: '0 0 * * *' # 每天 UTC 00:00 运行
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest # 使用最新的 Ubuntu 运行器
+    strategy:
+      matrix:
+        pg_version: ['15', '16', '17', '18', 'latest'] # 定义要构建的 PostgreSQL 版本
+
+    steps:
+      # 第一步：检出代码
+      # 拉取您的仓库代码，以便 Action 可以访问 Dockerfile 和 init.sql
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 第二步：设置 QEMU (可选, 但推荐)
+      # 这是一个很好的实践，用于支持多平台构建 (虽然本示例中未显式使用)
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      # 第三步：设置 Docker Buildx
+      # Buildx 是一个 Docker CLI 插件，用于扩展构建功能
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # 第四步：登录到容器仓库
+      # 动态登录到 Docker Hub 或私有仓库
+      # 如果 REGISTRY_URL Secret 未设置, 'registry' 参数将为空, 默认为 Docker Hub
+      - name: Log in to Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.REGISTRY_URL }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_TOKEN }}
+
+      # 第五步：动态设置镜像标签
+      # 根据是否设置了私有仓库 URL 来构建完整的镜像名称
+      - name: Set image tags
+        id: meta
+        run: |
+          # 使用 matrix.pg_version 作为标签后缀
+          IMAGE_TAG_SUFFIX=":${{ matrix.pg_version }}"
+          if [ -z "${{ secrets.REGISTRY_URL }}" ]; then
+            # Docker Hub (没有 registry-url)
+            echo "IMAGE_TAGS=${{ secrets.REGISTRY_IMAGE_NAME }}${IMAGE_TAG_SUFFIX}" >> $GITHUB_OUTPUT
+          else
+            # 私有仓库
+            echo "IMAGE_TAGS=${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_IMAGE_NAME }}${IMAGE_TAG_SUFFIX}" >> $GITHUB_OUTPUT
+          fi
+
+      # 第六步：构建并推送 Docker 镜像
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: . # Dockerfile 所在的上下文路径 (仓库根目录)
+          file: ./Dockerfile # Dockerfile 的文件路径
+          push: true # 确认执行推送操作
+          
+          # 从上一步动态获取镜像标签
+          tags: ${{ steps.meta.outputs.IMAGE_TAGS }}
+          
+          build-args: | # 传递给 Dockerfile 的构建参数
+            version=${{ matrix.pg_version }} # 使用 matrix 中的版本
+            # 您也可以在这里覆盖 APT 镜像和 GitHub 代理，例如:
+            # APT_MIRROR=http://mirrors.aliyun.com
+            # GITHUB_PROXY_PREFIX=https://ghproxy.com/
+
