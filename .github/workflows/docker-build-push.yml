@@ -78,8 +78,8 @@ jobs:
           # 从上一步动态获取镜像标签
           tags: ${{ steps.meta.outputs.IMAGE_TAGS }}
           
-          build-args: | # 传递给 Dockerfile 的构建参数
-            version=${{ matrix.pg_version }} # 使用 matrix 中的版本
+          build-args: | # 传递给 Dockerfile 的构建参数 # 使用 matrix 中的版本
+            version=${{ matrix.pg_version }} 
             # 您也可以在这里覆盖 APT 镜像和 GitHub 代理，例如:
             # APT_MIRROR=http://mirrors.aliyun.com
             # GITHUB_PROXY_PREFIX=https://ghproxy.com/
