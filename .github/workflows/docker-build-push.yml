@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest # 使用最新的 Ubuntu 运行器
     strategy:
       matrix:
-        pg_version: ['15','16','17','18','latest'] # 定义要构建的 PostgreSQL 版本 
+        pg_version: ['17', '18'] # 只构建 17 和 18 版本
 
     steps:
       # 第一步：检出代码
@@ -52,39 +52,30 @@ jobs:
           username: ${{ secrets.REGISTRY_USERNAME }}
           password: ${{ secrets.REGISTRY_TOKEN }}
 
-      # 第五步：动态设置镜像标签和构建参数
-      - name: Set image tags and build args
+      # 第五步：动态设置镜像标签
+      # 为 '18' 版本添加 'latest' 标签
+      - name: Set image tags
         id: meta
         run: |
           local_pg_version="${{ matrix.pg_version }}"
           
-          # DOCKERFILE_VERSION_ARG 是传递给 Dockerfile 的 'version' 参数.
-          # 它必须是一个版本号 (例如 '15', '16'), 因为 Dockerfile 使用它来拉取 'postgres:NN-bookworm' 和 'postgresql-server-dev-NN'.
-          #
-          # IMAGE_TAG_SUFFIX 是我们最终推送到仓库的 Docker 标签 (例如 ':15', ':latest').
-          
-          if [ "$local_pg_version" == "latest" ]; then
-            # 当矩阵要求 'latest' 时:
-            # 1. 我们假设 '18' 是当前的最新版，并用它来构建。
-            #    (如果 'latest' 变为 '19'，您需要回来将这里更新为 '19')
-            echo "DOCKERFILE_VERSION_ARG=18" >> $GITHUB_OUTPUT
-            # 2. 我们将最终的镜像标签设为 ':latest'。
-            echo "IMAGE_TAG_SUFFIX=:latest" >> $GITHUB_OUTPUT
-          else
-            # 对于所有数字版本 (例如 '15'):
-            # 1. 我们直接使用该版本号进行构建。
-            echo "DOCKERFILE_VERSION_ARG=${local_pg_version}" >> $GITHUB_OUTPUT
-            # 2. 我们使用该版本号作为标签。
-            echo "IMAGE_TAG_SUFFIX=:${local_pg_version}" >> $GITHUB_OUTPUT
-          fi
-
-          # 根据是否设置了私有仓库 URL 来构建完整的镜像推送路径
+          # 定义基础镜像名称
+          local_base_image_name=""
           if [ -z "${{ secrets.REGISTRY_URL }}" ]; then
-            # Docker Hub (没有 registry-url)
-            echo "IMAGE_TAGS=${{ secrets.REGISTRY_IMAGE_NAME }}${IMAGE_TAG_SUFFIX}" >> $GITHUB_OUTPUT
+            # Docker Hub
+            local_base_image_name="${{ secrets.REGISTRY_IMAGE_NAME }}"
           else
             # 私有仓库
-            echo "IMAGE_TAGS=${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_IMAGE_NAME }}${IMAGE_TAG_SUFFIX}" >> $GITHUB_OUTPUT
+            local_base_image_name="${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_IMAGE_NAME }}"
+          fi
+
+          # 设置镜像标签
+          if [ "$local_pg_version" == "18" ]; then
+            # 对于版本 18, 同时标记为 :18 和 :latest
+            echo "IMAGE_TAGS=${local_base_image_name}:18,${local_base_image_name}:latest" >> $GITHUB_OUTPUT
+          else
+            # 对于所有其他版本 (例如 '17'), 仅使用版本号标记
+            echo "IMAGE_TAGS=${local_base_image_name}:${local_pg_version}" >> $GITHUB_OUTPUT
           fi
 
       # 第六步：构建并推送 Docker 镜像
@@ -95,11 +86,11 @@ jobs:
           file: ./Dockerfile # Dockerfile 的文件路径
           push: true # 确认执行推送操作
           
-          # 从上一步动态获取镜像标签
+          # 从上一步动态获取镜像标签 (例如: ...:18, ...:latest)
           tags: ${{ steps.meta.outputs.IMAGE_TAGS }}
           
-          build-args: | # 传递给 Dockerfile 的构建参数  # 使用上一步动态设置的版本号
-            version=${{ steps.meta.outputs.DOCKERFILE_VERSION_ARG }}
+          build-args: | # 传递给 Dockerfile 的构建参数 # 直接使用 matrix 中的版本号
+            version=${{ matrix.pg_version }} 
             # 您也可以在这里覆盖 APT 镜像和 GitHub 代理，例如:
             # APT_MIRROR=http://mirrors.aliyun.com
             # GITHUB_PROXY_PREFIX=https://ghproxy.com/
